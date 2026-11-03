@@ -31,13 +31,13 @@ class LaftelPost:
         self.channel.pack(fill='x',padx=18,pady=(4,12),ipady=6)
         self.channel.insert(0, self.config.get("channel_id", ""))
 
-        # --- เพิ่มช่องพิมพ์ข้อความอธิบาย (Description) ---
+        # ช่องพิมพ์ข้อความอธิบาย (Description)
         tk.Label(card,text='ข้อความอธิบาย (Description)',bg=WHITE,fg=TEXT,font=('Segoe UI',10,'bold')).pack(anchor='w',padx=18)
         self.desc_text = tk.Text(card,height=3,font=('Segoe UI',10),relief='flat',bg=PALE,fg=TEXT,wrap='word')
         self.desc_text.pack(fill='x',padx=18,pady=(4,14))
         self.desc_text.insert('1.0', self.config.get("description", ""))
 
-        # เปิดใช้งานคีย์ลัด Ctrl+C, Ctrl+V, Ctrl+A ในช่องกรอกทั้งหมด
+        # เปิดใช้งานคีย์ลัด Ctrl+C, Ctrl+V, Ctrl+A แบบแก้ไขให้วางได้ชัวร์
         for widget in [self.token, self.channel, self.desc_text]:
             self.bind_shortcuts(widget)
 
@@ -53,7 +53,6 @@ class LaftelPost:
         self.status=tk.Label(root,text='พร้อมใช้งาน ✿',bg=PALE,fg=TEXT,font=('Segoe UI',10)); self.status.pack(pady=(0,12))
 
     def load_config(self):
-        """โหลดค่าตั้งค่าจาก config.json"""
         if os.path.exists(CONFIG_FILE):
             try:
                 with open(CONFIG_FILE, "r", encoding="utf-8") as f:
@@ -63,7 +62,6 @@ class LaftelPost:
         return {"bot_token": "", "channel_id": "", "description": ""}
 
     def save_config(self, token, channel, desc):
-        """บันทึกค่าลง config.json"""
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as f:
                 json.dump({"bot_token": token, "channel_id": channel, "description": desc}, f, ensure_ascii=False, indent=4)
@@ -71,18 +69,52 @@ class LaftelPost:
             print(f"Error saving config: {e}")
 
     def bind_shortcuts(self, widget):
-        """ผูกคีย์ลัด คัดลอก วาง เลือกทั้งหมด ให้ทำงานได้ปกติ"""
-        widget.bind("<Control-c>", lambda e: widget.event_generate("<<Copy>>"))
-        widget.bind("<Control-v>", lambda e: widget.event_generate("<<Paste>>"))
-        widget.bind("<Control-x>", lambda e: widget.event_generate("<<Cut>>"))
-        widget.bind("<Control-a>", lambda e: self.select_all(widget, e))
+        """ระบบจัดการคีย์ลัด ดึงข้อความวางและคัดลอกโดยตรง"""
+        widget.bind("<Control-v>", lambda e: self.paste_text(e))
+        widget.bind("<Control-c>", lambda e: self.copy_text(e))
+        widget.bind("<Control-x>", lambda e: self.cut_text(e))
+        widget.bind("<Control-a>", lambda e: self.select_all(e))
 
-    def select_all(self, widget, event):
-        if isinstance(widget, tk.Text):
-            widget.tag_add("sel", "1.0", "end")
+    def paste_text(self, event):
+        try:
+            text = self.root.clipboard_get()
+            if isinstance(event.widget, tk.Text):
+                event.widget.insert("insert", text)
+            else:
+                event.widget.insert(tk.INSERT, text)
+        except Exception:
+            pass
+        return "break"
+
+    def copy_text(self, event):
+        try:
+            if isinstance(event.widget, tk.Text):
+                selected = event.widget.get("sel.first", "sel.last")
+            else:
+                selected = event.widget.selection_get()
+            self.root.clipboard_clear()
+            self.root.clipboard_append(selected)
+        except Exception:
+            pass
+        return "break"
+
+    def cut_text(self, event):
+        try:
+            self.copy_text(event)
+            if isinstance(event.widget, tk.Text):
+                event.widget.delete("sel.first", "sel.last")
+            else:
+                event.widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+        except Exception:
+            pass
+        return "break"
+
+    def select_all(self, event):
+        if isinstance(event.widget, tk.Text):
+            event.widget.tag_add("sel", "1.0", "end")
         else:
-            widget.select_range(0, "end")
-            widget.icursor("end")
+            event.widget.select_range(0, "end")
+            event.widget.icursor("end")
         return "break"
 
     def btn(self,parent,label,cmd,light=False):
@@ -107,7 +139,6 @@ class LaftelPost:
         if not cid.isdigit(): messagebox.showwarning('Laftel Post','กรุณาใส่ Channel ID เป็นตัวเลข'); return
         if not self.files: messagebox.showwarning('Laftel Post','กรุณาเลือกรูปก่อน'); return
         
-        # บันทึกค่าลงไฟล์ถาวรทันทีเมื่อกดโพสต์
         self.save_config(token, cid, description)
 
         self.busy=True; self.post.config(state='disabled')
@@ -126,8 +157,7 @@ class LaftelPost:
             for i,path in enumerate(paths,1):
                 self.status_text(f'กำลังโพสต์รูป {i}/{len(paths)} ...')
                 with open(path,'rb') as f:
-                    # ส่งข้อความ Description ไปพร้อมกับรูปภาพ (ส่งข้อความทุกรูป หรือจะส่งเฉพาะรูปแรกก็ได้)
-                    content_to_send = desc if i == 1 else "" # ส่งคำอธิบายในรูปแรก รูปถัดไปส่งแต่รูป
+                    content_to_send = desc if i == 1 else ""
                     await channel.send(content=content_to_send, file=discord.File(f,filename=os.path.basename(path)))
             self.status_text(f'โพสต์สำเร็จ {len(paths)} รูปแล้ว ♡')
         finally: await client.close()
