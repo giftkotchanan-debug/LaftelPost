@@ -1,0 +1,29 @@
+name: Build Laftel Post Windows Installer
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+permissions:
+  contents: read
+jobs:
+  build:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Install Python dependencies
+        run: python -m pip install --upgrade pip && pip install -r requirements.txt
+      - name: Build application
+        run: pyinstaller --clean --noconfirm LaftelPost.spec
+      - name: Install Inno Setup
+        run: choco install innosetup --yes --no-progress
+      - name: Build installer
+        shell: cmd
+        run: iscc installer.iss
+      - uses: actions/upload-artifact@v4
+        with:
+          name: LaftelPost-Windows-Installer
+          path: dist/LaftelPost_Setup.exe
+          if-no-files-found: error
