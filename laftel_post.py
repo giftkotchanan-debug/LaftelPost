@@ -261,16 +261,111 @@ class LaftelPost:
                 f"บันทึกการตั้งค่าไม่สำเร็จ แต่ยังสามารถส่งโพสต์ต่อได้\n{exc}"
             )
 
+    
     def bind_shortcuts(self, widget):
-        """Map Ctrl shortcuts to Tk native virtual events."""
-        widget.bind("<Control-v>", self._virtual_paste)
-        widget.bind("<Control-V>", self._virtual_paste)
-        widget.bind("<Control-c>", self._virtual_copy)
-        widget.bind("<Control-C>", self._virtual_copy)
-        widget.bind("<Control-x>", self._virtual_cut)
-        widget.bind("<Control-X>", self._virtual_cut)
+        """รองรับ Ctrl+V, Ctrl+C, Ctrl+X และ Ctrl+A บน Windows"""
+        widget.bind("<Control-v>", self._paste_clipboard)
+        widget.bind("<Control-V>", self._paste_clipboard)
+        widget.bind("<Control-c>", self._copy_clipboard)
+        widget.bind("<Control-C>", self._copy_clipboard)
+        widget.bind("<Control-x>", self._cut_clipboard)
+        widget.bind("<Control-X>", self._cut_clipboard)
         widget.bind("<Control-a>", self._select_all)
         widget.bind("<Control-A>", self._select_all)
+
+    @staticmethod
+    def _paste_clipboard(event):
+        widget = event.widget
+
+        try:
+            text = widget.clipboard_get()
+
+            if isinstance(widget, tk.Text):
+                if str(widget.cget("state")) == "disabled":
+                    return "break"
+
+                try:
+                    widget.delete("sel.first", "sel.last")
+                except tk.TclError:
+                    pass
+
+                widget.insert("insert", text)
+
+            elif isinstance(widget, tk.Entry):
+                if str(widget.cget("state")) == "disabled":
+                    return "break"
+
+                try:
+                    widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+                except tk.TclError:
+                    pass
+
+                widget.insert(tk.INSERT, text)
+
+        except tk.TclError:
+            pass
+
+        return "break"
+
+    @staticmethod
+    def _copy_clipboard(event):
+        widget = event.widget
+
+        try:
+            if isinstance(widget, tk.Text):
+                selected = widget.get("sel.first", "sel.last")
+            else:
+                selected = widget.selection_get()
+
+            widget.clipboard_clear()
+            widget.clipboard_append(selected)
+        except tk.TclError:
+            pass
+
+        return "break"
+
+    @staticmethod
+    def _cut_clipboard(event):
+        widget = event.widget
+
+        try:
+            if isinstance(widget, tk.Text):
+                if str(widget.cget("state")) == "disabled":
+                    return "break"
+
+                selected = widget.get("sel.first", "sel.last")
+                widget.clipboard_clear()
+                widget.clipboard_append(selected)
+                widget.delete("sel.first", "sel.last")
+
+            elif isinstance(widget, tk.Entry):
+                if str(widget.cget("state")) == "disabled":
+                    return "break"
+
+                selected = widget.selection_get()
+                widget.clipboard_clear()
+                widget.clipboard_append(selected)
+                widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+
+        except tk.TclError:
+            pass
+
+        return "break"
+
+    @staticmethod
+    def _select_all(event):
+        widget = event.widget
+
+        if isinstance(widget, tk.Text):
+            widget.tag_add("sel", "1.0", "end-1c")
+            widget.mark_set("insert", "1.0")
+            widget.see("insert")
+
+        elif isinstance(widget, tk.Entry):
+            widget.select_range(0, "end")
+            widget.icursor("end")
+
+        return "break"
 
     @staticmethod
     def _virtual_paste(event):
