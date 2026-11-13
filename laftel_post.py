@@ -263,116 +263,38 @@ class LaftelPost:
     # -------------------- Keyboard shortcuts --------------------
 
     def setup_keyboard_shortcuts(self):
-        self.root.bind_class(SHORTCUT_TAG, "<Control-v>", self._paste_clipboard)
-        self.root.bind_class(SHORTCUT_TAG, "<Control-V>", self._paste_clipboard)
-        self.root.bind_class(SHORTCUT_TAG, "<Control-c>", self._copy_clipboard)
-        self.root.bind_class(SHORTCUT_TAG, "<Control-C>", self._copy_clipboard)
-        self.root.bind_class(SHORTCUT_TAG, "<Control-x>", self._cut_clipboard)
-        self.root.bind_class(SHORTCUT_TAG, "<Control-X>", self._cut_clipboard)
-        self.root.bind_class(SHORTCUT_TAG, "<Control-a>", self._select_all)
-        self.root.bind_class(SHORTCUT_TAG, "<Control-A>", self._select_all)
-        self.root.bind_class(SHORTCUT_TAG, "<KeyPress>", self._handle_shortcuts)
-
-    def bind_shortcuts(self, widget):
-        tags = list(widget.bindtags())
-        if SHORTCUT_TAG not in tags:
-            tags.insert(0, SHORTCUT_TAG)
-            widget.bindtags(tuple(tags))
-
-    def _handle_shortcuts(self, event):
-        if not isinstance(event.widget, (tk.Entry, tk.Text)):
-            return None
-        if not (event.state & 0x4):
-            return None
-        key = event.keysym.lower()
-        handlers = {
-            "v": self._paste_clipboard,
-            "c": self._copy_clipboard,
-            "x": self._cut_clipboard,
-            "a": self._select_all,
-        }
-        handler = handlers.get(key)
-        return handler(event) if handler else None
-
-    @staticmethod
-    def _native_clipboard_text():
-        """Read Unicode clipboard text through Windows API, then Tk fallback."""
-        if os.name == "nt":
-            user32 = ctypes.windll.user32
-            kernel32 = ctypes.windll.kernel32
-            kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
-            kernel32.GlobalLock.restype = ctypes.c_void_p
-            kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
-            user32.GetClipboardData.argtypes = [ctypes.c_uint]
-            user32.GetClipboardData.restype = ctypes.c_void_p
-            if user32.OpenClipboard(None):
-                try:
-                    handle = user32.GetClipboardData(13)  # CF_UNICODETEXT
-                    if handle:
-                        pointer = kernel32.GlobalLock(handle)
-                        if pointer:
-                            try:
-                                return ctypes.wstring_at(pointer)
-                            finally:
-                                kernel32.GlobalUnlock(handle)
-                finally:
-                    user32.CloseClipboard()
+        # Shortcuts are attached directly to each input widget below.
+        # Tk virtual events use the native clipboard implementation.
         return None
 
+    def bind_shortcuts(self, widget):
+        bindings = {
+            "<Control-v>": "<<Paste>>",
+            "<Control-V>": "<<Paste>>",
+            "<Shift-Insert>": "<<Paste>>",
+            "<Control-c>": "<<Copy>>",
+            "<Control-C>": "<<Copy>>",
+            "<Control-Insert>": "<<Copy>>",
+            "<Control-x>": "<<Cut>>",
+            "<Control-X>": "<<Cut>>",
+            "<Shift-Delete>": "<<Cut>>",
+        }
+        for sequence, virtual_event in bindings.items():
+            widget.bind(
+                sequence,
+                lambda event, virtual_event=virtual_event:
+                    self._generate_clipboard_event(event, virtual_event)
+            )
+        widget.bind("<Control-a>", self._select_all)
+        widget.bind("<Control-A>", self._select_all)
+
     @staticmethod
-    def _paste_clipboard(event):
+    def _generate_clipboard_event(event, virtual_event):
         widget = event.widget
         try:
             if str(widget.cget("state")) == "disabled":
                 return "break"
-            value = LaftelPost._native_clipboard_text()
-            if value is None:
-                value = widget.clipboard_get()
-            if isinstance(widget, tk.Text):
-                try:
-                    widget.delete("sel.first", "sel.last")
-                except tk.TclError:
-                    pass
-                widget.insert("insert", value)
-                widget.see("insert")
-            else:
-                try:
-                    widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
-                except tk.TclError:
-                    pass
-                widget.insert(tk.INSERT, value)
-        except (tk.TclError, OSError, AttributeError):
-            pass
-        return "break"
-
-    @staticmethod
-    def _copy_clipboard(event):
-        widget = event.widget
-        try:
-            selected = (widget.get("sel.first", "sel.last")
-                        if isinstance(widget, tk.Text)
-                        else widget.selection_get())
-            widget.clipboard_clear()
-            widget.clipboard_append(selected)
-        except tk.TclError:
-            pass
-        return "break"
-
-    @staticmethod
-    def _cut_clipboard(event):
-        widget = event.widget
-        try:
-            if str(widget.cget("state")) == "disabled":
-                return "break"
-            selected = (widget.get("sel.first", "sel.last")
-                        if isinstance(widget, tk.Text)
-                        else widget.selection_get())
-            widget.clipboard_clear()
-            widget.clipboard_append(selected)
-            if isinstance(widget, tk.Text):
-                widget.delete("sel.first", "sel.last")
-            else:
-                widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+            widget.event_generate(virtual_event)
         except tk.TclError:
             pass
         return "break"
