@@ -1,11 +1,21 @@
 import asyncio
+import ctypes
 import json
 import os
+import re
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
 
 import discord
+
+try:
+    from tkinterdnd2 import DND_FILES, TkinterDnD
+    DND_AVAILABLE = True
+except ImportError:
+    DND_FILES = None
+    TkinterDnD = None
+    DND_AVAILABLE = False
 
 PINK = "#F4B8D0"
 PALE = "#FFF5F9"
@@ -14,124 +24,20 @@ TEXT = "#75485D"
 MUTED = "#A77B90"
 CONFIG_FILE = "config.json"
 IMAGE_TYPES = (".png", ".jpg", ".jpeg", ".gif", ".webp")
-
 SHORTCUT_TAG = "LaftelPostShortcuts"
 
 
-class PostGroup:
-    """One Discord message: one description plus one image."""
+def natural_sort_key(path):
+    """Sort filenames as humans expect: 1, 2, 10 instead of 1, 10, 2."""
+    name = os.path.basename(path).casefold()
+    return [int(part) if part.isdigit() else part
+            for part in re.split(r"(\d+)", name)]
 
-    def __init__(self, app, number):
-        self.app = app
-        self.number = number
-        self.image_path = None
 
-        self.frame = tk.Frame(
-            app.groups_inner,
-            bg=WHITE,
-            highlightbackground="#F5D7E4",
-            highlightthickness=1
-        )
-        self.frame.pack(fill="x", pady=5)
-
-        top = tk.Frame(self.frame, bg=WHITE)
-        top.pack(fill="x", padx=12, pady=(10, 4))
-
-        self.title = tk.Label(
-            top,
-            text=f"ชุดโพสต์ {number}",
-            bg=WHITE,
-            fg=TEXT,
-            font=("Segoe UI", 11, "bold")
-        )
-        self.title.pack(side="left")
-
-        self.remove_button = tk.Button(
-            top,
-            text="ลบชุดนี้",
-            command=lambda: app.remove_group(self),
-            bg=WHITE,
-            fg=MUTED,
-            activebackground=PALE,
-            relief="flat",
-            bd=0,
-            cursor="hand2"
-        )
-        self.remove_button.pack(side="right")
-
-        tk.Label(
-            self.frame,
-            text="ข้อความที่จะส่งพร้อมรูปนี้",
-            bg=WHITE,
-            fg=TEXT,
-            font=("Segoe UI", 9, "bold")
-        ).pack(anchor="w", padx=12, pady=(4, 3))
-
-        self.description = tk.Text(
-            self.frame,
-            height=3,
-            font=("Segoe UI", 10),
-            relief="flat",
-            bg=PALE,
-            fg=TEXT,
-            wrap="word",
-            undo=True
-        )
-        self.description.pack(fill="x", padx=12, pady=(0, 8))
-
-        image_row = tk.Frame(self.frame, bg=WHITE)
-        image_row.pack(fill="x", padx=12, pady=(0, 10))
-
-        self.image_label = tk.Label(
-            image_row,
-            text="ยังไม่ได้เลือกรูป",
-            bg=WHITE,
-            fg=MUTED,
-            font=("Segoe UI", 9),
-            anchor="w"
-        )
-        self.image_label.pack(side="left", fill="x", expand=True)
-
-        tk.Button(
-            image_row,
-            text="เลือกรูป",
-            command=self.choose_image,
-            bg=PINK,
-            fg=WHITE,
-            activebackground="#E99DBD",
-            relief="flat",
-            bd=0,
-            font=("Segoe UI", 9),
-            cursor="hand2",
-            padx=12,
-            pady=5
-        ).pack(side="right")
-
-        app.bind_shortcuts(self.description)
-
-    def choose_image(self):
-        path = filedialog.askopenfilename(
-            title=f"เลือกรูปสำหรับชุดโพสต์ {self.number}",
-            filetypes=[
-                ("Image files", "*.png *.jpg *.jpeg *.gif *.webp")
-            ]
-        )
-
-        if path:
-            self.image_path = path
-            self.image_label.config(
-                text=os.path.basename(path),
-                fg=TEXT
-            )
-
-    def get_data(self):
-        return {
-            "description": self.description.get("1.0", "end-1c").strip(),
-            "image_path": self.image_path,
-        }
-
-    def destroy(self):
-        self.frame.destroy()
+class PostSendError(Exception):
+    def __init__(self, message, sent):
+        super().__init__(message)
+        self.sent = sent
 
 
 class LaftelPost:
@@ -143,9 +49,8 @@ class LaftelPost:
         self.root.configure(bg=PALE)
 
         self.busy = False
-        self.groups = []
+        self.image_paths = []
         self.config = self.load_config()
-
         self.setup_keyboard_shortcuts()
 
         style = ttk.Style()
@@ -158,82 +63,49 @@ class LaftelPost:
         header.pack(fill="x", padx=28, pady=(18, 8))
 
         tk.Label(
-            header,
-            text="♡  Laftel Post",
-            font=("Segoe UI", 27, "bold"),
-            bg=PALE,
-            fg=TEXT
+            header, text="♡  Laftel Post",
+            font=("Segoe UI", 27, "bold"), bg=PALE, fg=TEXT
         ).pack(anchor="w")
 
         tk.Label(
             header,
-            text="FREE EDITION  •  หนึ่งชุดข้อความต่อหนึ่งรูป",
-            font=("Segoe UI", 10),
-            bg=PALE,
-            fg=MUTED
+            text="FREE EDITION  •  โพสต์หลายรูปแยกข้อความอัตโนมัติ",
+            font=("Segoe UI", 10), bg=PALE, fg=MUTED
         ).pack(anchor="w", pady=(2, 0))
 
         self.settings_card = tk.Frame(
-            root,
-            bg=WHITE,
-            highlightbackground="#F5D7E4",
+            root, bg=WHITE, highlightbackground="#F5D7E4",
             highlightthickness=1
         )
         self.settings_card.pack(fill="x", padx=28, pady=6)
 
         tk.Label(
-            self.settings_card,
-            text="ตั้งค่าบอท Discord",
-            font=("Segoe UI", 13, "bold"),
-            bg=WHITE,
-            fg=TEXT
+            self.settings_card, text="ตั้งค่าบอท Discord",
+            font=("Segoe UI", 13, "bold"), bg=WHITE, fg=TEXT
         ).pack(anchor="w", padx=18, pady=(12, 6))
 
         tk.Label(
-            self.settings_card,
-            text="Bot Token",
-            bg=WHITE,
-            fg=TEXT,
+            self.settings_card, text="Bot Token", bg=WHITE, fg=TEXT,
             font=("Segoe UI", 10, "bold")
         ).pack(anchor="w", padx=18)
 
         self.token = tk.Entry(
-            self.settings_card,
-            show="•",
-            font=("Segoe UI", 11),
-            relief="flat",
-            bg=PALE,
-            fg=TEXT
+            self.settings_card, show="•", font=("Segoe UI", 11),
+            relief="flat", bg=PALE, fg=TEXT
         )
-        self.token.pack(
-            fill="x",
-            padx=18,
-            pady=(4, 10),
-            ipady=6
-        )
+        self.token.pack(fill="x", padx=18, pady=(4, 10), ipady=6)
         self.token.insert(0, self.config.get("bot_token", ""))
 
         tk.Label(
-            self.settings_card,
-            text="Channel ID",
-            bg=WHITE,
-            fg=TEXT,
+            self.settings_card, text="Channel ID", bg=WHITE, fg=TEXT,
             font=("Segoe UI", 10, "bold")
         ).pack(anchor="w", padx=18)
 
         self.channel = tk.Entry(
-            self.settings_card,
-            font=("Segoe UI", 11),
-            relief="flat",
-            bg=PALE,
-            fg=TEXT
+            self.settings_card, font=("Segoe UI", 11),
+            relief="flat", bg=PALE, fg=TEXT
         )
-        self.channel.pack(
-            fill="x",
-            padx=18,
-            pady=(4, 12),
-            ipady=6
-        )
+        self.channel.pack(fill="x", padx=18, pady=(4, 12), ipady=6)
         self.channel.insert(0, self.config.get("channel_id", ""))
 
         self.bind_shortcuts(self.token)
@@ -242,124 +114,180 @@ class LaftelPost:
         area = tk.Frame(root, bg=PALE)
         area.pack(fill="both", expand=True, padx=28, pady=(8, 4))
 
-        title_row = tk.Frame(area, bg=PALE)
-        title_row.pack(fill="x")
+        tk.Label(
+            area, text="ตั้งชื่อข้อความและเพิ่มรูปภาพ",
+            font=("Segoe UI", 13, "bold"), bg=PALE, fg=TEXT
+        ).pack(anchor="w", pady=(0, 6))
+
+        naming_card = tk.Frame(
+            area, bg=WHITE, highlightbackground="#F5D7E4",
+            highlightthickness=1
+        )
+        naming_card.pack(fill="x", pady=(0, 8))
+
+        name_row = tk.Frame(naming_card, bg=WHITE)
+        name_row.pack(fill="x", padx=14, pady=(10, 5))
 
         tk.Label(
-            title_row,
-            text="ชุดข้อความและรูปภาพ",
-            font=("Segoe UI", 13, "bold"),
-            bg=PALE,
-            fg=TEXT
+            name_row, text="ชื่อหลัก", bg=WHITE, fg=TEXT,
+            font=("Segoe UI", 10, "bold")
         ).pack(side="left")
 
+        self.name_prefix = tk.Entry(
+            name_row, font=("Segoe UI", 11), relief="flat",
+            bg=PALE, fg=TEXT
+        )
+        self.name_prefix.pack(side="left", fill="x", expand=True,
+                              padx=(12, 0), ipady=5)
+        self.name_prefix.insert(0, self.config.get("name_prefix", "hair"))
+        self.bind_shortcuts(self.name_prefix)
+
+        number_row = tk.Frame(naming_card, bg=WHITE)
+        number_row.pack(fill="x", padx=14, pady=(4, 5))
+
+        tk.Label(
+            number_row, text="เลขเริ่มต้น", bg=WHITE, fg=TEXT,
+            font=("Segoe UI", 10, "bold")
+        ).pack(side="left")
+
+        self.start_number = tk.Entry(
+            number_row, width=8, font=("Segoe UI", 11),
+            relief="flat", bg=PALE, fg=TEXT
+        )
+        self.start_number.pack(side="left", padx=(12, 18), ipady=5)
+        self.start_number.insert(0, str(self.config.get("start_number", 1)))
+        self.bind_shortcuts(self.start_number)
+
+        tk.Label(
+            number_row, text="จำนวนหลัก", bg=WHITE, fg=TEXT,
+            font=("Segoe UI", 10, "bold")
+        ).pack(side="left")
+
+        self.digit_width = tk.Entry(
+            number_row, width=8, font=("Segoe UI", 11),
+            relief="flat", bg=PALE, fg=TEXT
+        )
+        self.digit_width.pack(side="left", padx=(12, 0), ipady=5)
+        self.digit_width.insert(0, str(self.config.get("digit_width", 2)))
+        self.bind_shortcuts(self.digit_width)
+
+        tk.Label(
+            naming_card,
+            text="ตัวอย่างข้อความ: hair 01, hair 02, hair 03 ...",
+            bg=WHITE, fg=MUTED, font=("Segoe UI", 9)
+        ).pack(anchor="w", padx=14, pady=(0, 10))
+
+        drop_card = tk.Frame(
+            area, bg=WHITE, highlightbackground="#F5D7E4",
+            highlightthickness=1
+        )
+        drop_card.pack(fill="x", pady=(0, 8))
+
+        self.drop_label = tk.Label(
+            drop_card,
+            text=("ลากรูปภาพมาวางที่นี่ได้เลย  ♡\n"
+                  "รองรับ PNG, JPG, JPEG, GIF, WEBP"
+                  if DND_AVAILABLE else
+                  "เลือกภาพหลายรูปพร้อมกันได้  ♡\n"
+                  "ติดตั้งส่วนเสริม Drag & Drop ไม่สำเร็จ"),
+            bg=PALE, fg=TEXT, font=("Segoe UI", 11, "bold"),
+            justify="center", padx=10, pady=18,
+            relief="flat"
+        )
+        self.drop_label.pack(fill="x", padx=12, pady=12)
+
+        if DND_AVAILABLE:
+            try:
+                self.drop_label.drop_target_register(DND_FILES)
+                self.drop_label.dnd_bind("<<Drop>>", self.on_drop)
+            except Exception:
+                self.drop_label.config(
+                    text="ใช้ปุ่มเลือกรูปภาพด้านล่างเพื่อเพิ่มรูป"
+                )
+
+        button_row = tk.Frame(area, bg=PALE)
+        button_row.pack(fill="x", pady=(0, 6))
+
         self.add_button = tk.Button(
-            title_row,
-            text="＋ เพิ่มชุดโพสต์",
-            command=self.add_group,
-            bg=PINK,
-            fg=WHITE,
-            activebackground="#E99DBD",
-            relief="flat",
-            bd=0,
-            font=("Segoe UI", 10, "bold"),
-            cursor="hand2",
-            padx=12,
-            pady=6
+            button_row, text="＋ เลือกรูปภาพ", command=self.choose_images,
+            bg=PINK, fg=WHITE, activebackground="#E99DBD",
+            relief="flat", bd=0, font=("Segoe UI", 10, "bold"),
+            cursor="hand2", padx=12, pady=7
         )
-        self.add_button.pack(side="right")
+        self.add_button.pack(side="left")
 
-        list_shell = tk.Frame(area, bg=PALE)
-        list_shell.pack(fill="both", expand=True, pady=6)
-
-        self.canvas = tk.Canvas(
-            list_shell,
-            bg=PALE,
-            highlightthickness=0,
-            bd=0
+        self.remove_button = tk.Button(
+            button_row, text="ลบรูปที่เลือก", command=self.remove_selected,
+            bg=WHITE, fg=MUTED, activebackground=PALE,
+            relief="flat", bd=0, font=("Segoe UI", 9),
+            cursor="hand2", padx=12, pady=7
         )
+        self.remove_button.pack(side="left", padx=7)
 
-        scrollbar = ttk.Scrollbar(
-            list_shell,
-            orient="vertical",
-            command=self.canvas.yview
+        self.clear_button = tk.Button(
+            button_row, text="ล้างรูปทั้งหมด", command=self.clear_images,
+            bg=WHITE, fg=MUTED, activebackground=PALE,
+            relief="flat", bd=0, font=("Segoe UI", 9),
+            cursor="hand2", padx=12, pady=7
         )
+        self.clear_button.pack(side="right")
 
-        self.canvas.configure(yscrollcommand=scrollbar.set)
-        scrollbar.pack(side="right", fill="y")
-        self.canvas.pack(side="left", fill="both", expand=True)
+        list_frame = tk.Frame(area, bg=WHITE)
+        list_frame.pack(fill="both", expand=True, pady=(0, 4))
 
-        self.groups_inner = tk.Frame(self.canvas, bg=PALE)
-
-        self.canvas_window = self.canvas.create_window(
-            (0, 0),
-            window=self.groups_inner,
-            anchor="nw"
+        self.image_list = tk.Listbox(
+            list_frame, selectmode=tk.EXTENDED,
+            font=("Segoe UI", 10), bg=WHITE, fg=TEXT,
+            selectbackground=PINK, selectforeground=TEXT,
+            relief="flat", bd=0, height=7,
+            activestyle="none"
         )
-
-        self.groups_inner.bind("<Configure>", self._update_scroll_region)
-        self.canvas.bind("<Configure>", self._resize_groups_inner)
+        list_scroll = ttk.Scrollbar(
+            list_frame, orient="vertical", command=self.image_list.yview
+        )
+        self.image_list.configure(yscrollcommand=list_scroll.set)
+        self.image_list.pack(side="left", fill="both", expand=True,
+                            padx=(10, 0), pady=8)
+        list_scroll.pack(side="right", fill="y", padx=(0, 8), pady=8)
 
         self.count = tk.Label(
-            area,
-            text="0 ชุดโพสต์",
-            bg=PALE,
-            fg=MUTED,
+            area, text="ยังไม่มีรูปภาพ", bg=PALE, fg=MUTED,
             font=("Segoe UI", 9)
         )
         self.count.pack(anchor="e", pady=(0, 2))
 
         self.post = tk.Button(
-            root,
-            text="♡  POST TO DISCORD  ♡",
-            command=self.start,
-            bg=PINK,
-            fg=WHITE,
-            activebackground="#E99DBD",
-            activeforeground=WHITE,
-            font=("Segoe UI", 12, "bold"),
-            relief="flat",
-            bd=0,
-            cursor="hand2"
+            root, text="♡  POST TO DISCORD  ♡", command=self.start,
+            bg=PINK, fg=WHITE, activebackground="#E99DBD",
+            activeforeground=WHITE, font=("Segoe UI", 12, "bold"),
+            relief="flat", bd=0, cursor="hand2"
         )
         self.post.pack(fill="x", padx=28, pady=(6, 6), ipady=10)
 
         self.status = tk.Label(
-            root,
-            text="พร้อมใช้งาน ✿",
-            bg=PALE,
-            fg=TEXT,
+            root, text="พร้อมใช้งาน ✿", bg=PALE, fg=TEXT,
             font=("Segoe UI", 10)
         )
         self.status.pack(pady=(0, 12))
 
-        saved_groups = self.config.get("post_groups", [])
+        for path in self.config.get("image_paths", []):
+            if os.path.isfile(path) and path.lower().endswith(IMAGE_TYPES):
+                self.image_paths.append(path)
+        self.sort_images()
+        self.refresh_image_list()
 
-        if saved_groups:
-            for item in saved_groups:
-                group = self.add_group()
-                group.description.insert("1.0", item.get("description", ""))
-
-                path = item.get("image_path")
-                if path and os.path.isfile(path):
-                    group.image_path = path
-                    group.image_label.config(
-                        text=os.path.basename(path),
-                        fg=TEXT
-                    )
-        else:
-            self.add_group()
-
-    # ---------------------------------------------------------
-    # WINDOWS KEYBOARD SHORTCUTS
-    # ---------------------------------------------------------
+    # -------------------- Keyboard shortcuts --------------------
 
     def setup_keyboard_shortcuts(self):
-        self.root.bind_class(
-            SHORTCUT_TAG,
-            "<KeyPress>",
-            self._handle_shortcuts
-        )
+        self.root.bind_class(SHORTCUT_TAG, "<Control-v>", self._paste_clipboard)
+        self.root.bind_class(SHORTCUT_TAG, "<Control-V>", self._paste_clipboard)
+        self.root.bind_class(SHORTCUT_TAG, "<Control-c>", self._copy_clipboard)
+        self.root.bind_class(SHORTCUT_TAG, "<Control-C>", self._copy_clipboard)
+        self.root.bind_class(SHORTCUT_TAG, "<Control-x>", self._cut_clipboard)
+        self.root.bind_class(SHORTCUT_TAG, "<Control-X>", self._cut_clipboard)
+        self.root.bind_class(SHORTCUT_TAG, "<Control-a>", self._select_all)
+        self.root.bind_class(SHORTCUT_TAG, "<Control-A>", self._select_all)
+        self.root.bind_class(SHORTCUT_TAG, "<KeyPress>", self._handle_shortcuts)
 
     def bind_shortcuts(self, widget):
         tags = list(widget.bindtags())
@@ -368,23 +296,43 @@ class LaftelPost:
             widget.bindtags(tuple(tags))
 
     def _handle_shortcuts(self, event):
-        widget = event.widget
-        if not isinstance(widget, (tk.Entry, tk.Text)):
+        if not isinstance(event.widget, (tk.Entry, tk.Text)):
             return None
-
-        # Ctrl modifier on Windows Tk.
         if not (event.state & 0x4):
             return None
-
         key = event.keysym.lower()
-        if key == "v":
-            return self._paste_clipboard(event)
-        if key == "c":
-            return self._copy_clipboard(event)
-        if key == "x":
-            return self._cut_clipboard(event)
-        if key == "a":
-            return self._select_all(event)
+        handlers = {
+            "v": self._paste_clipboard,
+            "c": self._copy_clipboard,
+            "x": self._cut_clipboard,
+            "a": self._select_all,
+        }
+        handler = handlers.get(key)
+        return handler(event) if handler else None
+
+    @staticmethod
+    def _native_clipboard_text():
+        """Read Unicode clipboard text through Windows API, then Tk fallback."""
+        if os.name == "nt":
+            user32 = ctypes.windll.user32
+            kernel32 = ctypes.windll.kernel32
+            kernel32.GlobalLock.argtypes = [ctypes.c_void_p]
+            kernel32.GlobalLock.restype = ctypes.c_void_p
+            kernel32.GlobalUnlock.argtypes = [ctypes.c_void_p]
+            user32.GetClipboardData.argtypes = [ctypes.c_uint]
+            user32.GetClipboardData.restype = ctypes.c_void_p
+            if user32.OpenClipboard(None):
+                try:
+                    handle = user32.GetClipboardData(13)  # CF_UNICODETEXT
+                    if handle:
+                        pointer = kernel32.GlobalLock(handle)
+                        if pointer:
+                            try:
+                                return ctypes.wstring_at(pointer)
+                            finally:
+                                kernel32.GlobalUnlock(handle)
+                finally:
+                    user32.CloseClipboard()
         return None
 
     @staticmethod
@@ -393,22 +341,23 @@ class LaftelPost:
         try:
             if str(widget.cget("state")) == "disabled":
                 return "break"
-
-            clipboard_text = widget.clipboard_get()
-
+            value = LaftelPost._native_clipboard_text()
+            if value is None:
+                value = widget.clipboard_get()
             if isinstance(widget, tk.Text):
                 try:
                     widget.delete("sel.first", "sel.last")
                 except tk.TclError:
                     pass
-                widget.insert("insert", clipboard_text)
+                widget.insert("insert", value)
+                widget.see("insert")
             else:
                 try:
                     widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
                 except tk.TclError:
                     pass
-                widget.insert(tk.INSERT, clipboard_text)
-        except tk.TclError:
+                widget.insert(tk.INSERT, value)
+        except (tk.TclError, OSError, AttributeError):
             pass
         return "break"
 
@@ -416,10 +365,9 @@ class LaftelPost:
     def _copy_clipboard(event):
         widget = event.widget
         try:
-            if isinstance(widget, tk.Text):
-                selected = widget.get("sel.first", "sel.last")
-            else:
-                selected = widget.selection_get()
+            selected = (widget.get("sel.first", "sel.last")
+                        if isinstance(widget, tk.Text)
+                        else widget.selection_get())
             widget.clipboard_clear()
             widget.clipboard_append(selected)
         except tk.TclError:
@@ -432,16 +380,14 @@ class LaftelPost:
         try:
             if str(widget.cget("state")) == "disabled":
                 return "break"
-
+            selected = (widget.get("sel.first", "sel.last")
+                        if isinstance(widget, tk.Text)
+                        else widget.selection_get())
+            widget.clipboard_clear()
+            widget.clipboard_append(selected)
             if isinstance(widget, tk.Text):
-                selected = widget.get("sel.first", "sel.last")
-                widget.clipboard_clear()
-                widget.clipboard_append(selected)
                 widget.delete("sel.first", "sel.last")
             else:
-                selected = widget.selection_get()
-                widget.clipboard_clear()
-                widget.clipboard_append(selected)
                 widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
         except tk.TclError:
             pass
@@ -459,9 +405,7 @@ class LaftelPost:
             widget.icursor("end")
         return "break"
 
-    # ---------------------------------------------------------
-    # CONFIG
-    # ---------------------------------------------------------
+    # -------------------- Config --------------------
 
     def load_config(self):
         if os.path.isfile(CONFIG_FILE):
@@ -472,20 +416,20 @@ class LaftelPost:
                         return data
             except (OSError, json.JSONDecodeError):
                 pass
-
         return {
-            "bot_token": "",
-            "channel_id": "",
-            "post_groups": []
+            "bot_token": "", "channel_id": "", "name_prefix": "hair",
+            "start_number": 1, "digit_width": 2, "image_paths": []
         }
 
-    def save_config(self, token, channel, groups_data):
+    def save_config(self, token, channel):
         data = {
             "bot_token": token,
             "channel_id": channel,
-            "post_groups": groups_data,
+            "name_prefix": self.name_prefix.get().strip(),
+            "start_number": int(self.start_number.get()),
+            "digit_width": int(self.digit_width.get()),
+            "image_paths": self.image_paths,
         }
-
         try:
             with open(CONFIG_FILE, "w", encoding="utf-8") as file:
                 json.dump(data, file, ensure_ascii=False, indent=4)
@@ -495,53 +439,77 @@ class LaftelPost:
                 f"บันทึกการตั้งค่าไม่สำเร็จ แต่ยังสามารถส่งโพสต์ต่อได้\n{exc}"
             )
 
-    # ---------------------------------------------------------
-    # POST GROUPS
-    # ---------------------------------------------------------
+    # -------------------- Image selection --------------------
 
-    def add_group(self):
-        group = PostGroup(self, len(self.groups) + 1)
-        self.groups.append(group)
-        self.renumber_groups()
-        self.count.config(text=f"{len(self.groups)} ชุดโพสต์")
-        return group
+    def add_images(self, paths):
+        added = 0
+        for path in paths:
+            path = os.path.abspath(path)
+            if (os.path.isfile(path)
+                    and path.lower().endswith(IMAGE_TYPES)
+                    and path not in self.image_paths):
+                self.image_paths.append(path)
+                added += 1
+        self.sort_images()
+        self.refresh_image_list()
+        if added:
+            self.status.config(text=f"เพิ่มรูป {added} รูปแล้ว เรียงตามชื่อไฟล์ ♡")
 
-    def remove_group(self, group):
+    def sort_images(self):
+        self.image_paths.sort(key=natural_sort_key)
+
+    def choose_images(self):
+        paths = filedialog.askopenfilenames(
+            title="เลือกรูปภาพ (เลือกได้หลายรูป)",
+            filetypes=[("Image files", "*.png *.jpg *.jpeg *.gif *.webp")]
+        )
+        if paths:
+            self.add_images(paths)
+
+    def on_drop(self, event):
+        try:
+            paths = self.root.tk.splitlist(event.data)
+            self.add_images(paths)
+        except Exception as exc:
+            messagebox.showerror("Laftel Post", f"อ่านไฟล์ที่ลากมาวางไม่ได้\n{exc}")
+        return "break"
+
+    def remove_selected(self):
         if self.busy:
             return
+        selected = list(self.image_list.curselection())
+        for index in reversed(selected):
+            del self.image_paths[index]
+        self.refresh_image_list()
 
-        if len(self.groups) <= 1:
-            messagebox.showinfo(
-                "Laftel Post",
-                "ต้องมีอย่างน้อย 1 ชุดโพสต์"
-            )
+    def clear_images(self):
+        if self.busy:
             return
+        if not self.image_paths:
+            return
+        if messagebox.askyesno("Laftel Post", "ต้องการล้างรูปภาพทั้งหมดหรือไม่?"):
+            self.image_paths.clear()
+            self.refresh_image_list()
 
-        self.groups.remove(group)
-        group.destroy()
-        self.renumber_groups()
-        self.count.config(text=f"{len(self.groups)} ชุดโพสต์")
+    def refresh_image_list(self):
+        self.image_list.delete(0, tk.END)
+        for index, path in enumerate(self.image_paths, 1):
+            self.image_list.insert(
+                tk.END, f"{index:03d}.  {os.path.basename(path)}"
+            )
+        self.count.config(text=f"{len(self.image_paths)} รูปภาพ • เรียงตามชื่อไฟล์")
 
-    def renumber_groups(self):
-        for index, group in enumerate(self.groups, 1):
-            group.number = index
-            group.title.config(text=f"ชุดโพสต์ {index}")
-
-    def _update_scroll_region(self, _event=None):
-        self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-
-    def _resize_groups_inner(self, event):
-        self.canvas.itemconfigure(self.canvas_window, width=event.width)
-
-    # ---------------------------------------------------------
-    # DISCORD POSTING
-    # ---------------------------------------------------------
+    # -------------------- Discord posting --------------------
 
     def set_status(self, text):
-        self.root.after(
-            0,
-            lambda value=text: self.status.config(text=value)
-        )
+        self.root.after(0, lambda value=text: self.status.config(text=value))
+
+    def set_busy(self, value):
+        self.busy = value
+        state = "disabled" if value else "normal"
+        for button in (self.post, self.add_button,
+                       self.remove_button, self.clear_button):
+            button.config(state=state)
 
     def start(self):
         if self.busy:
@@ -549,140 +517,130 @@ class LaftelPost:
 
         token = self.token.get().strip()
         channel_id = self.channel.get().strip()
+        prefix = self.name_prefix.get().strip()
 
         if not token:
             messagebox.showwarning("Laftel Post", "กรุณาใส่ Bot Token")
             return
-
         if not channel_id.isdigit():
+            messagebox.showwarning("Laftel Post", "กรุณาใส่ Channel ID เป็นตัวเลข")
+            return
+        if not prefix:
+            messagebox.showwarning("Laftel Post", "กรุณาใส่ชื่อหลัก เช่น hair")
+            return
+        if not self.image_paths:
+            messagebox.showwarning("Laftel Post", "กรุณาเพิ่มรูปภาพก่อน")
+            return
+
+        try:
+            start_number = int(self.start_number.get())
+            digit_width = int(self.digit_width.get())
+            if start_number < 0 or digit_width < 1 or digit_width > 6:
+                raise ValueError
+        except ValueError:
             messagebox.showwarning(
-                "Laftel Post",
-                "กรุณาใส่ Channel ID เป็นตัวเลข"
+                "Laftel Post", "เลขเริ่มต้นต้องเป็น 0 ขึ้นไป และจำนวนหลัก 1–6"
             )
             return
 
-        groups_data = [group.get_data() for group in self.groups]
-
-        if not groups_data:
+        missing = [p for p in self.image_paths if not os.path.isfile(p)]
+        if missing:
             messagebox.showwarning(
-                "Laftel Post",
-                "กรุณาเพิ่มชุดโพสต์ก่อน"
+                "Laftel Post", "ไม่พบไฟล์รูปบางรายการ:\n" + "\n".join(missing[:5])
             )
             return
 
-        for index, item in enumerate(groups_data, 1):
-            path = item["image_path"]
+        self.sort_images()
+        jobs = []
+        for index, path in enumerate(self.image_paths):
+            number = start_number + index
+            caption = f"{prefix} {number:0{digit_width}d}"
+            jobs.append({"path": path, "caption": caption})
 
-            if not path:
-                messagebox.showwarning(
-                    "Laftel Post",
-                    f"ชุดโพสต์ {index} ยังไม่ได้เลือกรูป"
-                )
-                return
-
-            if not os.path.isfile(path):
-                messagebox.showwarning(
-                    "Laftel Post",
-                    f"ไม่พบไฟล์รูปของชุดโพสต์ {index}\n{path}"
-                )
-                return
-
-            if not path.lower().endswith(IMAGE_TYPES):
-                messagebox.showwarning(
-                    "Laftel Post",
-                    f"ชนิดไฟล์รูปของชุดโพสต์ {index} ไม่รองรับ"
-                )
-                return
-
-        self.save_config(token, channel_id, groups_data)
-
-        self.busy = True
-        self.post.config(state="disabled")
-        self.add_button.config(state="disabled")
-
-        for group in self.groups:
-            group.remove_button.config(state="disabled")
+        self.save_config(token, channel_id)
+        self.set_busy(True)
+        self.set_status(f"กำลังเตรียมส่ง {len(jobs)} รูป ...")
 
         threading.Thread(
             target=self.worker,
-            args=(token, int(channel_id), groups_data),
+            args=(token, int(channel_id), jobs),
             daemon=True
         ).start()
 
-    def worker(self, token, channel_id, groups_data):
+    def worker(self, token, channel_id, jobs):
         error_message = None
+        sent = 0
+        failed_caption = ""
+        failed_path = ""
         try:
-            asyncio.run(self.send_posts(token, channel_id, groups_data))
+            sent = asyncio.run(self.send_posts(token, channel_id, jobs))
+        except PostSendError as exc:
+            sent = exc.sent
+            error_message = str(exc)
         except discord.LoginFailure:
-            error_message = (
-                "Bot Token ไม่ถูกต้อง "
-                "กรุณาตรวจสอบ Token ใน Discord Developer Portal"
-            )
+            error_message = "Bot Token ไม่ถูกต้อง กรุณาตรวจสอบ Token ใน Discord Developer Portal"
         except discord.Forbidden:
             error_message = (
                 "บอทไม่มีสิทธิ์ส่งข้อความหรือแนบไฟล์ในห้องนี้\n"
-                "ตรวจสอบสิทธิ์ View Channel, Send Messages และ Attach Files"
+                "ตรวจสอบ View Channel, Send Messages และ Attach Files"
             )
         except discord.NotFound:
-            error_message = (
-                "ไม่พบ Channel ID นี้ หรือบอทไม่มีสิทธิ์เข้าถึงห้องดังกล่าว"
-            )
+            error_message = "ไม่พบ Channel ID นี้ หรือบอทไม่มีสิทธิ์เข้าถึงห้อง"
         except discord.HTTPException as exc:
-            error_message = (
-                f"Discord ตอบกลับข้อผิดพลาด HTTP ({exc.status}): {exc}"
-            )
+            error_message = f"Discord ตอบกลับข้อผิดพลาด HTTP ({exc.status}): {exc}"
         except Exception as exc:
             error_message = f"{type(exc).__name__}: {exc}"
         finally:
-            self.root.after(0, self._finish_post, error_message)
+            self.root.after(0, self._finish_post, error_message, sent, len(jobs))
 
-    def _finish_post(self, error_message):
-        self.busy = False
-        self.post.config(state="normal")
-        self.add_button.config(state="normal")
-
-        for group in self.groups:
-            group.remove_button.config(state="normal")
-
+    def _finish_post(self, error_message, sent, total):
+        self.set_busy(False)
         if error_message:
-            self.status.config(text="โพสต์ไม่สำเร็จ")
-            messagebox.showerror("ส่ง Discord ไม่สำเร็จ", error_message)
+            self.status.config(text=f"ส่งสำเร็จแล้ว {sent}/{total} รูป")
+            messagebox.showerror(
+                "ส่ง Discord ไม่สำเร็จ",
+                f"ส่งสำเร็จแล้ว {sent} จาก {total} รูป\n\n"
+                f"รูปถัดไปอาจยังไม่ได้ส่ง กรุณาตรวจสอบ Discord ก่อนกดส่งซ้ำ\n\n"
+                f"รายละเอียด: {error_message}"
+            )
         else:
-            self.status.config(text="โพสต์ทุกชุดสำเร็จแล้ว ♡")
+            self.status.config(text=f"โพสต์สำเร็จครบ {total} รูปแล้ว ♡")
             messagebox.showinfo(
                 "Laftel Post",
-                "ส่งโพสต์ทุกชุดไปยัง Discord สำเร็จแล้วค่ะ"
+                f"ส่งโพสต์แยกครบ {total} รูปเรียบร้อยแล้วค่ะ ♡"
             )
 
-    async def send_posts(self, token, channel_id, groups_data):
-        intents = discord.Intents.none()
-        client = discord.Client(intents=intents)
-
+    async def send_posts(self, token, channel_id, jobs):
+        client = discord.Client(intents=discord.Intents.none())
+        sent = 0
         try:
             await client.login(token)
             channel = await client.fetch_channel(channel_id)
-
             if not hasattr(channel, "send"):
                 raise RuntimeError("Channel นี้ไม่รองรับการส่งข้อความ")
 
-            total = len(groups_data)
-            for index, item in enumerate(groups_data, 1):
-                self.set_status(f"กำลังส่งชุดโพสต์ {index}/{total} ...")
-
-                await channel.send(
-                    content=item["description"] or None,
-                    file=discord.File(
-                        item["image_path"],
-                        filename=os.path.basename(item["image_path"])
-                    )
+            total = len(jobs)
+            for index, item in enumerate(jobs, 1):
+                self.set_status(
+                    f"กำลังส่ง {index}/{total}: {item['caption']} ..."
                 )
-
-            self.set_status(f"ส่งสำเร็จ {total} ชุดโพสต์แล้ว ♡")
+                with discord.File(
+                    item["path"], filename=os.path.basename(item["path"])
+                ) as upload:
+                    await channel.send(content=item["caption"], file=upload)
+                sent += 1
+            self.set_status(f"ส่งสำเร็จ {sent}/{total} รูปแล้ว ♡")
+            return sent
+        except Exception as exc:
+            raise PostSendError(str(exc), sent) from exc
         finally:
             await client.close()
 
 
 if __name__ == "__main__":
-    root = tk.Tk()
+    if DND_AVAILABLE:
+        root = TkinterDnD.Tk()
+    else:
+        root = tk.Tk()
     app = LaftelPost(root)
     root.mainloop()
