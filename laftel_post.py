@@ -263,45 +263,94 @@ class LaftelPost:
     # -------------------- Keyboard shortcuts --------------------
 
     def setup_keyboard_shortcuts(self):
-        # Shortcuts are attached directly to each input widget below.
-        # Tk virtual events use the native clipboard implementation.
-        return None
+        # Catch keyboard shortcuts at the toplevel so Tk class bindings
+        # cannot swallow Ctrl+V on Windows.
+        self.root.bind_all("<KeyPress>", self._global_shortcuts, add="+")
 
     def bind_shortcuts(self, widget):
-        bindings = {
-            "<Control-v>": "<<Paste>>",
-            "<Control-V>": "<<Paste>>",
-            "<Shift-Insert>": "<<Paste>>",
-            "<Control-c>": "<<Copy>>",
-            "<Control-C>": "<<Copy>>",
-            "<Control-Insert>": "<<Copy>>",
-            "<Control-x>": "<<Cut>>",
-            "<Control-X>": "<<Cut>>",
-            "<Shift-Delete>": "<<Cut>>",
-        }
-        for sequence, virtual_event in bindings.items():
-            widget.bind(
-                sequence,
-                lambda event, virtual_event=virtual_event:
-                    self._generate_clipboard_event(event, virtual_event)
-            )
-        widget.bind("<Control-a>", self._select_all)
-        widget.bind("<Control-A>", self._select_all)
+        # Retain compatibility for all editable fields; global handler
+        # handles Ctrl combinations and Shift+Insert.
+        return None
 
-    @staticmethod
-    def _generate_clipboard_event(event, virtual_event):
+    def _global_shortcuts(self, event):
         widget = event.widget
+        if not isinstance(widget, (tk.Entry, tk.Text)):
+            return None
         try:
             if str(widget.cget("state")) == "disabled":
+                return None
+        except tk.TclError:
+            return None
+
+        key = event.keysym.lower()
+        ctrl_down = bool(event.state & 0x4)
+        if os.name == "nt":
+            try:
+                ctrl_down = ctrl_down or bool(ctypes.windll.user32.GetKeyState(0x11) & 0x8000)
+            except Exception:
+                pass
+
+        if ctrl_down and key in ("v", "c", "x", "a"):
+            if key == "v":
+                return self._paste_text(widget)
+            if key == "c":
+                return self._copy_text(widget)
+            if key == "x":
+                self._copy_text(widget)
+                self._delete_selection(widget)
                 return "break"
-            widget.event_generate(virtual_event)
+            return self._select_all_for_widget(widget)
+
+        if key == "insert" and (event.state & 0x1):
+            return self._paste_text(widget)
+        return None
+
+    @staticmethod
+    def _paste_text(widget):
+        try:
+            value = widget.clipboard_get()
+            if isinstance(widget, tk.Text):
+                try:
+                    widget.delete("sel.first", "sel.last")
+                except tk.TclError:
+                    pass
+                widget.insert("insert", value)
+                widget.see("insert")
+            else:
+                try:
+                    widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+                except tk.TclError:
+                    pass
+                widget.insert(tk.INSERT, value)
+        except (tk.TclError, OSError):
+            pass
+        return "break"
+
+    @staticmethod
+    def _copy_text(widget):
+        try:
+            selected = (widget.get("sel.first", "sel.last")
+                        if isinstance(widget, tk.Text)
+                        else widget.selection_get())
+            widget.clipboard_clear()
+            widget.clipboard_append(selected)
+            widget.update_idletasks()
         except tk.TclError:
             pass
         return "break"
 
     @staticmethod
-    def _select_all(event):
-        widget = event.widget
+    def _delete_selection(widget):
+        try:
+            if isinstance(widget, tk.Text):
+                widget.delete("sel.first", "sel.last")
+            else:
+                widget.delete(tk.SEL_FIRST, tk.SEL_LAST)
+        except tk.TclError:
+            pass
+
+    @staticmethod
+    def _select_all_for_widget(widget):
         if isinstance(widget, tk.Text):
             widget.tag_add("sel", "1.0", "end-1c")
             widget.mark_set("insert", "1.0")
@@ -310,6 +359,10 @@ class LaftelPost:
             widget.select_range(0, "end")
             widget.icursor("end")
         return "break"
+
+    @staticmethod
+    def _select_all(event):
+        return LaftelPost._select_all_for_widget(event.widget)
 
     # -------------------- Config --------------------
 
