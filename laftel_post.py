@@ -44,8 +44,8 @@ class LaftelPost:
     def __init__(self, root):
         self.root = root
         self.root.title("Laftel Post")
-        self.root.geometry("760x820")
-        self.root.minsize(680, 650)
+        self.root.geometry("920x570")
+        self.root.minsize(800, 500)
         self.root.configure(bg=PALE)
 
         self.busy = False
@@ -60,11 +60,11 @@ class LaftelPost:
             pass
 
         header = tk.Frame(root, bg=PALE)
-        header.pack(fill="x", padx=28, pady=(18, 8))
+        header.pack(fill="x", padx=18, pady=(10, 4))
 
         tk.Label(
             header, text="♡  Laftel Post",
-            font=("Segoe UI", 27, "bold"), bg=PALE, fg=TEXT
+            font=("Segoe UI", 21, "bold"), bg=PALE, fg=TEXT
         ).pack(anchor="w")
 
         tk.Label(
@@ -77,50 +77,75 @@ class LaftelPost:
             root, bg=WHITE, highlightbackground="#F5D7E4",
             highlightthickness=1
         )
-        self.settings_card.pack(fill="x", padx=28, pady=6)
-
-        tk.Label(
-            self.settings_card, text="ตั้งค่าบอท Discord",
-            font=("Segoe UI", 13, "bold"), bg=WHITE, fg=TEXT
-        ).pack(anchor="w", padx=18, pady=(12, 6))
+        self.settings_card.pack(fill="x", padx=18, pady=4)
 
         tk.Label(
             self.settings_card, text="Bot Token", bg=WHITE, fg=TEXT,
-            font=("Segoe UI", 10, "bold")
-        ).pack(anchor="w", padx=18)
+            font=("Segoe UI", 9, "bold")
+        ).grid(row=0, column=0, sticky="w", padx=(10, 5), pady=7)
 
         self.token = tk.Entry(
-            self.settings_card, show="•", font=("Segoe UI", 11),
-            relief="flat", bg=PALE, fg=TEXT
+            self.settings_card, show="•", font=("Segoe UI", 10),
+            relief="flat", bg=PALE, fg=TEXT, width=34
         )
-        self.token.pack(fill="x", padx=18, pady=(4, 10), ipady=6)
+        self.token.grid(row=0, column=1, sticky="ew", padx=4, pady=7, ipady=4)
         self.token.insert(0, self.config.get("bot_token", ""))
 
         tk.Label(
             self.settings_card, text="Channel ID", bg=WHITE, fg=TEXT,
-            font=("Segoe UI", 10, "bold")
-        ).pack(anchor="w", padx=18)
+            font=("Segoe UI", 9, "bold")
+        ).grid(row=0, column=2, sticky="w", padx=(12, 5), pady=7)
 
         self.channel = tk.Entry(
-            self.settings_card, font=("Segoe UI", 11),
-            relief="flat", bg=PALE, fg=TEXT
+            self.settings_card, font=("Segoe UI", 10),
+            relief="flat", bg=PALE, fg=TEXT, width=22
         )
-        self.channel.pack(fill="x", padx=18, pady=(4, 12), ipady=6)
+        self.channel.grid(row=0, column=3, sticky="ew", padx=(4, 10), pady=7, ipady=4)
         self.channel.insert(0, self.config.get("channel_id", ""))
+        self.settings_card.grid_columnconfigure(1, weight=1)
+        self.settings_card.grid_columnconfigure(3, weight=1)
 
         self.bind_shortcuts(self.token)
         self.bind_shortcuts(self.channel)
 
+        top_action = tk.Frame(root, bg=PALE)
+        top_action.pack(fill="x", padx=18, pady=(3, 5))
+
+        self.post = tk.Button(
+            top_action, text="♡  POST TO DISCORD  ♡", command=self.start,
+            bg=PINK, fg=WHITE, activebackground="#E99DBD",
+            activeforeground=WHITE, font=("Segoe UI", 11, "bold"),
+            relief="flat", bd=0, cursor="hand2", padx=22
+        )
+        self.post.pack(side="right", ipady=6)
+
+        self.status = tk.Label(
+            top_action, text="พร้อมใช้งาน ✿", bg=PALE, fg=TEXT,
+            font=("Segoe UI", 9)
+        )
+        self.status.pack(side="left", pady=5)
+
         area = tk.Frame(root, bg=PALE)
-        area.pack(fill="both", expand=True, padx=28, pady=(8, 4))
+        area.pack(fill="both", expand=True, padx=18, pady=(3, 4))
+
+        left_panel = tk.Frame(area, bg=PALE)
+        left_panel.pack(side="left", fill="both", expand=True, padx=(0, 8))
+
+        right_panel = tk.Frame(area, bg=PALE)
+        right_panel.pack(side="left", fill="both", expand=True, padx=(8, 0))
 
         tk.Label(
-            area, text="ตั้งชื่อข้อความและเพิ่มรูปภาพ",
-            font=("Segoe UI", 13, "bold"), bg=PALE, fg=TEXT
-        ).pack(anchor="w", pady=(0, 6))
+            left_panel, text="รูปแบบข้อความ",
+            font=("Segoe UI", 11, "bold"), bg=PALE, fg=TEXT
+        ).pack(anchor="w", pady=(0, 4))
+
+        tk.Label(
+            right_panel, text="เพิ่มและจัดการรูปภาพ",
+            font=("Segoe UI", 11, "bold"), bg=PALE, fg=TEXT
+        ).pack(anchor="w", pady=(0, 4))
 
         naming_card = tk.Frame(
-            area, bg=WHITE, highlightbackground="#F5D7E4",
+            left_panel, bg=WHITE, highlightbackground="#F5D7E4",
             highlightthickness=1
         )
         naming_card.pack(fill="x", pady=(0, 8))
@@ -150,7 +175,7 @@ class LaftelPost:
         ).pack(anchor="w", padx=14, pady=(0, 10))
 
         drop_card = tk.Frame(
-            area, bg=WHITE, highlightbackground="#F5D7E4",
+            right_panel, bg=WHITE, highlightbackground="#F5D7E4",
             highlightthickness=1
         )
         drop_card.pack(fill="x", pady=(0, 8))
@@ -177,7 +202,7 @@ class LaftelPost:
                     text="ใช้ปุ่มเลือกรูปภาพด้านล่างเพื่อเพิ่มรูป"
                 )
 
-        button_row = tk.Frame(area, bg=PALE)
+        button_row = tk.Frame(right_panel, bg=PALE)
         button_row.pack(fill="x", pady=(0, 6))
 
         self.add_button = tk.Button(
@@ -204,14 +229,14 @@ class LaftelPost:
         )
         self.clear_button.pack(side="right")
 
-        list_frame = tk.Frame(area, bg=WHITE)
+        list_frame = tk.Frame(right_panel, bg=WHITE)
         list_frame.pack(fill="both", expand=True, pady=(0, 4))
 
         self.image_list = tk.Listbox(
             list_frame, selectmode=tk.EXTENDED,
-            font=("Segoe UI", 10), bg=WHITE, fg=TEXT,
+            font=("Segoe UI", 9), bg=WHITE, fg=TEXT,
             selectbackground=PINK, selectforeground=TEXT,
-            relief="flat", bd=0, height=7,
+            relief="flat", bd=0, height=9,
             activestyle="none"
         )
         list_scroll = ttk.Scrollbar(
@@ -223,24 +248,10 @@ class LaftelPost:
         list_scroll.pack(side="right", fill="y", padx=(0, 8), pady=8)
 
         self.count = tk.Label(
-            area, text="ยังไม่มีรูปภาพ", bg=PALE, fg=MUTED,
+            right_panel, text="ยังไม่มีรูปภาพ", bg=PALE, fg=MUTED,
             font=("Segoe UI", 9)
         )
         self.count.pack(anchor="e", pady=(0, 2))
-
-        self.post = tk.Button(
-            root, text="♡  POST TO DISCORD  ♡", command=self.start,
-            bg=PINK, fg=WHITE, activebackground="#E99DBD",
-            activeforeground=WHITE, font=("Segoe UI", 12, "bold"),
-            relief="flat", bd=0, cursor="hand2"
-        )
-        self.post.pack(fill="x", padx=28, pady=(6, 6), ipady=10)
-
-        self.status = tk.Label(
-            root, text="พร้อมใช้งาน ✿", bg=PALE, fg=TEXT,
-            font=("Segoe UI", 10)
-        )
-        self.status.pack(pady=(0, 12))
 
         for path in self.config.get("image_paths", []):
             if os.path.isfile(path) and path.lower().endswith(IMAGE_TYPES):
@@ -595,17 +606,24 @@ class LaftelPost:
 
             total = len(jobs)
             for index, item in enumerate(jobs, 1):
+                filename = os.path.basename(item["path"])
                 self.set_status(
-                    f"กำลังส่ง {index}/{total}: {item['caption']} ..."
+                    f"กำลังส่ง {index}/{total}: {filename} ..."
                 )
-                upload = discord.File(
-                    item["path"], filename=os.path.basename(item["path"])
-                )
+                upload = discord.File(item["path"], filename=filename)
                 try:
                     await channel.send(content=item["caption"], file=upload)
+                except Exception as exc:
+                    if isinstance(exc, discord.HTTPException):
+                        detail = f"{type(exc).__name__} HTTP {exc.status}: {exc}"
+                    else:
+                        detail = f"{type(exc).__name__}: {exc}"
+                    raise RuntimeError(f"ส่งไฟล์ {filename} ไม่สำเร็จ — {detail}") from exc
                 finally:
                     upload.close()
                 sent += 1
+                if index < total:
+                    await asyncio.sleep(1.0)
             self.set_status(f"ส่งสำเร็จ {sent}/{total} รูปแล้ว ♡")
             return sent
         except Exception as exc:
