@@ -401,7 +401,7 @@ class LaftelPost:
                 pass
         return {
             "bot_token": "", "channel_id": "",
-            "caption_template": "♡﹒**hair 60**\\n♡﹒price : 59.-",
+            "caption_template": "♡﹒**hair 60**\n♡﹒price : 59.-",
             "image_paths": []
         }
 
@@ -502,7 +502,7 @@ class LaftelPost:
         template = self.caption_template.get("1.0", "end-1c")
         lines = template.splitlines()
         first_line = lines[0] if lines else ""
-        number_match = re.search(r"\\d+", first_line)
+        number_match = re.search(r"\d+", first_line)
 
         if not token:
             messagebox.showwarning("Laftel Post", "กรุณาใส่ Bot Token")
@@ -539,7 +539,7 @@ class LaftelPost:
                 + first_line[number_match.end():]
             )
             caption_lines = [updated_first_line] + lines[1:]
-            caption = "\\n".join(caption_lines)
+            caption = "\n".join(caption_lines)
             jobs.append({"path": path, "caption": caption})
 
         self.save_config(token, channel_id)
