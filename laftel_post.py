@@ -3,6 +3,7 @@ import ctypes
 import json
 import os
 import re
+import sys
 import threading
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk
@@ -51,8 +52,10 @@ class LaftelPost:
 
         self.busy = False
         self.image_paths = []
+        self.config_path = self.get_config_path()
         self.config = self.load_config()
         self.setup_keyboard_shortcuts()
+        self.root.protocol("WM_DELETE_WINDOW", self.on_close)
 
         style = ttk.Style()
         try:
@@ -108,6 +111,8 @@ class LaftelPost:
 
         self.bind_shortcuts(self.token)
         self.bind_shortcuts(self.channel)
+        self.token.bind("<FocusOut>", self._save_on_focus_out, add="+")
+        self.channel.bind("<FocusOut>", self._save_on_focus_out, add="+")
 
         top_action = tk.Frame(root, bg=PALE)
         top_action.pack(fill="x", padx=18, pady=(3, 5))
@@ -167,6 +172,7 @@ class LaftelPost:
         )
         self.caption_template.insert("1.0", default_template)
         self.bind_shortcuts(self.caption_template)
+        self.caption_template.bind("<FocusOut>", self._save_on_focus_out, add="+")
 
         tk.Label(
             naming_card,
@@ -263,47 +269,33 @@ class LaftelPost:
     # -------------------- Keyboard shortcuts --------------------
 
     def setup_keyboard_shortcuts(self):
-        # Catch keyboard shortcuts at the toplevel so Tk class bindings
-        # cannot swallow Ctrl+V on Windows.
-        self.root.bind_all("<KeyPress>", self._global_shortcuts, add="+")
+        # Shortcuts are attached directly to each editable widget below.
+        return None
 
     def bind_shortcuts(self, widget):
-        # Retain compatibility for all editable fields; global handler
-        # handles Ctrl combinations and Shift+Insert.
-        return None
+        widget.bind("<Control-v>", self._paste_event, add="+")
+        widget.bind("<Control-V>", self._paste_event, add="+")
+        widget.bind("<Shift-Insert>", self._paste_event, add="+")
+        widget.bind("<Control-c>", self._copy_event, add="+")
+        widget.bind("<Control-C>", self._copy_event, add="+")
+        widget.bind("<Control-x>", self._cut_event, add="+")
+        widget.bind("<Control-X>", self._cut_event, add="+")
+        widget.bind("<Control-a>", self._select_all, add="+")
+        widget.bind("<Control-A>", self._select_all, add="+")
 
-    def _global_shortcuts(self, event):
-        widget = event.widget
-        if not isinstance(widget, (tk.Entry, tk.Text)):
-            return None
-        try:
-            if str(widget.cget("state")) == "disabled":
-                return None
-        except tk.TclError:
-            return None
+    @staticmethod
+    def _paste_event(event):
+        return LaftelPost._paste_text(event.widget)
 
-        key = event.keysym.lower()
-        ctrl_down = bool(event.state & 0x4)
-        if os.name == "nt":
-            try:
-                ctrl_down = ctrl_down or bool(ctypes.windll.user32.GetKeyState(0x11) & 0x8000)
-            except Exception:
-                pass
+    @staticmethod
+    def _copy_event(event):
+        return LaftelPost._copy_text(event.widget)
 
-        if ctrl_down and key in ("v", "c", "x", "a"):
-            if key == "v":
-                return self._paste_text(widget)
-            if key == "c":
-                return self._copy_text(widget)
-            if key == "x":
-                self._copy_text(widget)
-                self._delete_selection(widget)
-                return "break"
-            return self._select_all_for_widget(widget)
-
-        if key == "insert" and (event.state & 0x1):
-            return self._paste_text(widget)
-        return None
+    @staticmethod
+    def _cut_event(event):
+        LaftelPost._copy_text(event.widget)
+        LaftelPost._delete_selection(event.widget)
+        return "break"
 
     @staticmethod
     def _paste_text(widget):
@@ -366,22 +358,48 @@ class LaftelPost:
 
     # -------------------- Config --------------------
 
+    @staticmethod
+    def get_config_path():
+        # Use a writable per-user Windows settings directory.
+        appdata = os.environ.get("APPDATA") or os.path.expanduser("~")
+        folder = os.path.join(appdata, "Laftel Post")
+        return os.path.join(folder, "config.json")
+
     def load_config(self):
-        if os.path.isfile(CONFIG_FILE):
-            try:
-                with open(CONFIG_FILE, "r", encoding="utf-8") as file:
-                    data = json.load(file)
-                    if isinstance(data, dict):
-                        return data
-            except (OSError, json.JSONDecodeError):
-                pass
+        # Prefer AppData, but migrate an older config saved beside the EXE.
+        candidates = [self.config_path, os.path.abspath(CONFIG_FILE)]
+        if getattr(sys, "frozen", False):
+            candidates.append(os.path.join(os.path.dirname(sys.executable), CONFIG_FILE))
+        else:
+            candidates.append(os.path.join(os.path.dirname(os.path.abspath(__file__)), CONFIG_FILE))
+
+        checked = set()
+        for path in candidates:
+            path = os.path.abspath(path)
+            if path in checked:
+                continue
+            checked.add(path)
+            if os.path.isfile(path):
+                try:
+                    with open(path, "r", encoding="utf-8") as file:
+                        data = json.load(file)
+                        if isinstance(data, dict):
+                            return data
+                except (OSError, json.JSONDecodeError):
+                    pass
         return {
             "bot_token": "", "channel_id": "",
             "caption_template": "♡﹒**hair 60**\n♡﹒price : 59.-",
             "image_paths": []
         }
 
-    def save_config(self, token, channel):
+    def save_config(self, token=None, channel=None):
+        if token is None:
+            token = self.token.get().strip()
+            if token.lower().startswith("bot "):
+                token = token[4:].strip()
+        if channel is None:
+            channel = self.channel.get().strip()
         data = {
             "bot_token": token,
             "channel_id": channel,
@@ -389,13 +407,21 @@ class LaftelPost:
             "image_paths": self.image_paths,
         }
         try:
-            with open(CONFIG_FILE, "w", encoding="utf-8") as file:
+            os.makedirs(os.path.dirname(self.config_path), exist_ok=True)
+            with open(self.config_path, "w", encoding="utf-8") as file:
                 json.dump(data, file, ensure_ascii=False, indent=4)
         except OSError as exc:
             messagebox.showwarning(
                 "Laftel Post",
                 f"บันทึกการตั้งค่าไม่สำเร็จ แต่ยังสามารถส่งโพสต์ต่อได้\n{exc}"
             )
+
+    def _save_on_focus_out(self, _event=None):
+        self.save_config()
+
+    def on_close(self):
+        self.save_config()
+        self.root.destroy()
 
     # -------------------- Image selection --------------------
 
