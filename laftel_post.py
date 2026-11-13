@@ -125,56 +125,28 @@ class LaftelPost:
         )
         naming_card.pack(fill="x", pady=(0, 8))
 
-        name_row = tk.Frame(naming_card, bg=WHITE)
-        name_row.pack(fill="x", padx=14, pady=(10, 5))
-
         tk.Label(
-            name_row, text="ชื่อหลัก", bg=WHITE, fg=TEXT,
-            font=("Segoe UI", 10, "bold")
-        ).pack(side="left")
+            naming_card, text="รูปแบบข้อความ (แก้ไขได้หลายบรรทัด)",
+            bg=WHITE, fg=TEXT, font=("Segoe UI", 10, "bold")
+        ).pack(anchor="w", padx=14, pady=(10, 5))
 
-        self.name_prefix = tk.Entry(
-            name_row, font=("Segoe UI", 11), relief="flat",
-            bg=PALE, fg=TEXT
+        self.caption_template = tk.Text(
+            naming_card, height=3, wrap="word",
+            font=("Segoe UI", 11), bg=PALE, fg=TEXT,
+            relief="flat", padx=9, pady=7, undo=True
         )
-        self.name_prefix.pack(side="left", fill="x", expand=True,
-                              padx=(12, 0), ipady=5)
-        self.name_prefix.insert(0, self.config.get("name_prefix", "hair"))
-        self.bind_shortcuts(self.name_prefix)
-
-        number_row = tk.Frame(naming_card, bg=WHITE)
-        number_row.pack(fill="x", padx=14, pady=(4, 5))
-
-        tk.Label(
-            number_row, text="เลขเริ่มต้น", bg=WHITE, fg=TEXT,
-            font=("Segoe UI", 10, "bold")
-        ).pack(side="left")
-
-        self.start_number = tk.Entry(
-            number_row, width=8, font=("Segoe UI", 11),
-            relief="flat", bg=PALE, fg=TEXT
+        self.caption_template.pack(fill="x", padx=14, pady=(0, 6))
+        default_template = self.config.get(
+            "caption_template", "♡﹒**hair 60**\n♡﹒price : 59.-"
         )
-        self.start_number.pack(side="left", padx=(12, 18), ipady=5)
-        self.start_number.insert(0, str(self.config.get("start_number", 1)))
-        self.bind_shortcuts(self.start_number)
-
-        tk.Label(
-            number_row, text="จำนวนหลัก", bg=WHITE, fg=TEXT,
-            font=("Segoe UI", 10, "bold")
-        ).pack(side="left")
-
-        self.digit_width = tk.Entry(
-            number_row, width=8, font=("Segoe UI", 11),
-            relief="flat", bg=PALE, fg=TEXT
-        )
-        self.digit_width.pack(side="left", padx=(12, 0), ipady=5)
-        self.digit_width.insert(0, str(self.config.get("digit_width", 2)))
-        self.bind_shortcuts(self.digit_width)
+        self.caption_template.insert("1.0", default_template)
+        self.bind_shortcuts(self.caption_template)
 
         tk.Label(
             naming_card,
-            text="ตัวอย่างข้อความ: hair 01, hair 02, hair 03 ...",
-            bg=WHITE, fg=MUTED, font=("Segoe UI", 9)
+            text="โปรแกรมจะเปลี่ยนเฉพาะตัวเลขในบรรทัดแรก เช่น 60, 61, 62 ... ส่วนบรรทัดอื่นคงเดิม",
+            bg=WHITE, fg=MUTED, font=("Segoe UI", 9),
+            wraplength=650, justify="left"
         ).pack(anchor="w", padx=14, pady=(0, 10))
 
         drop_card = tk.Frame(
@@ -417,17 +389,16 @@ class LaftelPost:
             except (OSError, json.JSONDecodeError):
                 pass
         return {
-            "bot_token": "", "channel_id": "", "name_prefix": "hair",
-            "start_number": 1, "digit_width": 2, "image_paths": []
+            "bot_token": "", "channel_id": "",
+            "caption_template": "♡﹒**hair 60**\\n♡﹒price : 59.-",
+            "image_paths": []
         }
 
     def save_config(self, token, channel):
         data = {
             "bot_token": token,
             "channel_id": channel,
-            "name_prefix": self.name_prefix.get().strip(),
-            "start_number": int(self.start_number.get()),
-            "digit_width": int(self.digit_width.get()),
+            "caption_template": self.caption_template.get("1.0", "end-1c"),
             "image_paths": self.image_paths,
         }
         try:
@@ -517,7 +488,10 @@ class LaftelPost:
 
         token = self.token.get().strip()
         channel_id = self.channel.get().strip()
-        prefix = self.name_prefix.get().strip()
+        template = self.caption_template.get("1.0", "end-1c")
+        lines = template.splitlines()
+        first_line = lines[0] if lines else ""
+        number_match = re.search(r"\\d+", first_line)
 
         if not token:
             messagebox.showwarning("Laftel Post", "กรุณาใส่ Bot Token")
@@ -525,22 +499,14 @@ class LaftelPost:
         if not channel_id.isdigit():
             messagebox.showwarning("Laftel Post", "กรุณาใส่ Channel ID เป็นตัวเลข")
             return
-        if not prefix:
-            messagebox.showwarning("Laftel Post", "กรุณาใส่ชื่อหลัก เช่น hair")
+        if not number_match:
+            messagebox.showwarning(
+                "Laftel Post",
+                "กรุณาใส่เลขเริ่มต้นไว้ในบรรทัดแรก เช่น ♡﹒**hair 60**"
+            )
             return
         if not self.image_paths:
             messagebox.showwarning("Laftel Post", "กรุณาเพิ่มรูปภาพก่อน")
-            return
-
-        try:
-            start_number = int(self.start_number.get())
-            digit_width = int(self.digit_width.get())
-            if start_number < 0 or digit_width < 1 or digit_width > 6:
-                raise ValueError
-        except ValueError:
-            messagebox.showwarning(
-                "Laftel Post", "เลขเริ่มต้นต้องเป็น 0 ขึ้นไป และจำนวนหลัก 1–6"
-            )
             return
 
         missing = [p for p in self.image_paths if not os.path.isfile(p)]
@@ -552,9 +518,17 @@ class LaftelPost:
 
         self.sort_images()
         jobs = []
+        start_number = int(number_match.group(0))
+        number_width = len(number_match.group(0))
         for index, path in enumerate(self.image_paths):
-            number = start_number + index
-            caption = f"{prefix} {number:0{digit_width}d}"
+            number_text = str(start_number + index).zfill(number_width)
+            updated_first_line = (
+                first_line[:number_match.start()]
+                + number_text
+                + first_line[number_match.end():]
+            )
+            caption_lines = [updated_first_line] + lines[1:]
+            caption = "\\n".join(caption_lines)
             jobs.append({"path": path, "caption": caption})
 
         self.save_config(token, channel_id)
