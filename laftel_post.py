@@ -642,8 +642,12 @@ class LaftelPost:
                 self.set_status(
                     f"กำลังส่ง {index}/{total}: {filename} ..."
                 )
-                upload = discord.File(item["path"], filename=filename)
+                # Open the image explicitly and keep the underlying handle alive
+                # for the complete multipart upload. discord.File is closed in finally.
+                image_handle = open(item["path"], "rb")
+                upload = None
                 try:
+                    upload = discord.File(image_handle, filename=filename)
                     await channel.send(content=item["caption"], file=upload)
                 except Exception as exc:
                     if isinstance(exc, discord.HTTPException):
@@ -652,7 +656,10 @@ class LaftelPost:
                         detail = f"{type(exc).__name__}: {exc}"
                     raise RuntimeError(f"ส่งไฟล์ {filename} ไม่สำเร็จ — {detail}") from exc
                 finally:
-                    upload.close()
+                    if upload is not None:
+                        upload.close()
+                    if not image_handle.closed:
+                        image_handle.close()
                 sent += 1
                 if index < total:
                     await asyncio.sleep(1.0)
