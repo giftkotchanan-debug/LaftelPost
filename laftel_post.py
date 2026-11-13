@@ -35,9 +35,10 @@ def natural_sort_key(path):
 
 
 class PostSendError(Exception):
-    def __init__(self, message, sent):
+    def __init__(self, message, sent, original=None):
         super().__init__(message)
         self.sent = sent
+        self.original = original
 
 
 class LaftelPost:
@@ -498,6 +499,9 @@ class LaftelPost:
             return
 
         token = self.token.get().strip()
+        # Discord.py expects the raw bot token, not the "Bot " authorization prefix.
+        if token.lower().startswith("bot "):
+            token = token[4:].strip()
         channel_id = self.channel.get().strip()
         template = self.caption_template.get("1.0", "end-1c")
         lines = template.splitlines()
@@ -555,24 +559,52 @@ class LaftelPost:
     def worker(self, token, channel_id, jobs):
         error_message = None
         sent = 0
-        failed_caption = ""
-        failed_path = ""
         try:
             sent = asyncio.run(self.send_posts(token, channel_id, jobs))
         except PostSendError as exc:
             sent = exc.sent
-            error_message = str(exc)
-        except discord.LoginFailure:
-            error_message = "Bot Token ไม่ถูกต้อง กรุณาตรวจสอบ Token ใน Discord Developer Portal"
-        except discord.Forbidden:
-            error_message = (
-                "บอทไม่มีสิทธิ์ส่งข้อความหรือแนบไฟล์ในห้องนี้\n"
-                "ตรวจสอบ View Channel, Send Messages และ Attach Files"
-            )
-        except discord.NotFound:
-            error_message = "ไม่พบ Channel ID นี้ หรือบอทไม่มีสิทธิ์เข้าถึงห้อง"
-        except discord.HTTPException as exc:
-            error_message = f"Discord ตอบกลับข้อผิดพลาด HTTP ({exc.status}): {exc}"
+            cause = exc.original or exc
+            if isinstance(cause, discord.LoginFailure):
+                error_message = (
+                    "Bot Token ไม่ถูกต้อง (Discord ปฏิเสธการเข้าสู่ระบบ)\n"
+                    "ให้นำ Bot Token ใหม่จาก Discord Developer Portal มาใส่ "
+                    "และตรวจว่าไม่ได้คัดลอกคำว่า Bot นำหน้ามาด้วย"
+                )
+            elif isinstance(cause, discord.Forbidden):
+                error_message = (
+                    "บอทเข้าไม่ถึงห้องนี้หรือไม่มีสิทธิ์ส่งไฟล์แนบ (HTTP 403)\n"
+                    "เปิด Server Settings > Integrations/Bots แล้วตรวจว่าบอทอยู่ในเซิร์ฟเวอร์\n"
+                    "จากนั้นตั้งสิทธิ์ของห้องให้บอทมี View Channel, Send Messages "
+                    "และ Attach Files"
+                )
+            elif isinstance(cause, discord.NotFound):
+                error_message = (
+                    "ไม่พบ Channel ID นี้ (HTTP 404)\n"
+                    "เปิดโหมด Developer ใน Discord แล้วคลิกขวาที่ห้อง > Copy Channel ID "
+                    "และตรวจว่าบอทอยู่ในเซิร์ฟเวอร์นั้น"
+                )
+            elif isinstance(cause, discord.HTTPException):
+                status = cause.status
+                if status == 413:
+                    hint = "ไฟล์รูปใหญ่เกินขนาดที่ Discord อนุญาต กรุณาลดขนาดรูป"
+                elif status == 429:
+                    hint = "Discord จำกัดความถี่การส่งชั่วคราว กรุณารอสักครู่แล้วลองใหม่"
+                elif status == 401:
+                    hint = "Token ไม่ถูกต้องหรือหมดอายุ กรุณาตรวจสอบ Bot Token"
+                elif status == 403:
+                    hint = "บอทไม่มีสิทธิ์ View Channel, Send Messages หรือ Attach Files"
+                elif status == 404:
+                    hint = "ไม่พบห้องนี้ หรือบอทไม่มีสิทธิ์เข้าถึง"
+                else:
+                    hint = "ตรวจสอบการเชื่อมต่ออินเทอร์เน็ตและสิทธิ์ของบอท"
+                error_message = (
+                    f"Discord ตอบกลับ HTTP {status}: {cause}\n{hint}"
+                )
+            else:
+                error_message = (
+                    f"{type(cause).__name__}: {cause}\n"
+                    "ตรวจสอบอินเทอร์เน็ต, Token และ Channel ID"
+                )
         except Exception as exc:
             error_message = f"{type(exc).__name__}: {exc}"
         finally:
@@ -627,7 +659,7 @@ class LaftelPost:
             self.set_status(f"ส่งสำเร็จ {sent}/{total} รูปแล้ว ♡")
             return sent
         except Exception as exc:
-            raise PostSendError(str(exc), sent) from exc
+            raise PostSendError(str(exc), sent, exc) from exc
         finally:
             await client.close()
 
