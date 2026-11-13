@@ -273,34 +273,73 @@ class LaftelPost:
         return None
 
     def bind_shortcuts(self, widget):
-        widget.bind("<Control-v>", self._paste_event, add="+")
-        widget.bind("<Control-V>", self._paste_event, add="+")
+        # A widget-level KeyPress handler runs before Tk's default Entry/Text
+        # class bindings, avoiding Windows Ctrl+V being swallowed.
+        widget.bind("<KeyPress>", self._widget_keypress, add="+")
         widget.bind("<Shift-Insert>", self._paste_event, add="+")
-        widget.bind("<Control-c>", self._copy_event, add="+")
-        widget.bind("<Control-C>", self._copy_event, add="+")
-        widget.bind("<Control-x>", self._cut_event, add="+")
-        widget.bind("<Control-X>", self._cut_event, add="+")
-        widget.bind("<Control-a>", self._select_all, add="+")
-        widget.bind("<Control-A>", self._select_all, add="+")
+
+    def _widget_keypress(self, event):
+        widget = event.widget
+        key = (event.keysym or "").lower()
+        ctrl_down = bool(event.state & 0x4)
+        if os.name == "nt":
+            try:
+                ctrl_down = ctrl_down or bool(
+                    ctypes.windll.user32.GetKeyState(0x11) & 0x8000
+                )
+            except Exception:
+                pass
+        if not ctrl_down:
+            return None
+        if key == "v" or event.keycode == 86:
+            return self._paste_text(widget)
+        if key == "c" or event.keycode == 67:
+            return self._copy_text(widget)
+        if key == "x" or event.keycode == 88:
+            self._copy_text(widget)
+            self._delete_selection(widget)
+            return "break"
+        if key == "a" or event.keycode == 65:
+            return self._select_all_for_widget(widget)
+        return None
 
     @staticmethod
     def _paste_event(event):
         return LaftelPost._paste_text(event.widget)
 
     @staticmethod
-    def _copy_event(event):
-        return LaftelPost._copy_text(event.widget)
-
-    @staticmethod
-    def _cut_event(event):
-        LaftelPost._copy_text(event.widget)
-        LaftelPost._delete_selection(event.widget)
-        return "break"
+    def _get_clipboard_text(widget):
+        try:
+            return widget.clipboard_get()
+        except (tk.TclError, OSError):
+            if os.name != "nt":
+                raise
+        # Windows Unicode clipboard fallback, used if Tk cannot read CF_UNICODETEXT.
+        user32 = ctypes.windll.user32
+        kernel32 = ctypes.windll.kernel32
+        if not user32.OpenClipboard(None):
+            raise OSError("Windows clipboard is busy")
+        try:
+            CF_UNICODETEXT = 13
+            kernel32.GlobalLock.restype = ctypes.c_void_p
+            user32.GetClipboardData.restype = ctypes.c_void_p
+            handle = user32.GetClipboardData(CF_UNICODETEXT)
+            if not handle:
+                raise OSError("Clipboard has no Unicode text")
+            pointer = kernel32.GlobalLock(handle)
+            if not pointer:
+                raise OSError("Cannot read Windows clipboard")
+            try:
+                return ctypes.wstring_at(pointer)
+            finally:
+                kernel32.GlobalUnlock(handle)
+        finally:
+            user32.CloseClipboard()
 
     @staticmethod
     def _paste_text(widget):
         try:
-            value = widget.clipboard_get()
+            value = LaftelPost._get_clipboard_text(widget)
             if isinstance(widget, tk.Text):
                 try:
                     widget.delete("sel.first", "sel.last")
@@ -314,8 +353,11 @@ class LaftelPost:
                 except tk.TclError:
                     pass
                 widget.insert(tk.INSERT, value)
-        except (tk.TclError, OSError):
-            pass
+        except (tk.TclError, OSError, AttributeError) as exc:
+            try:
+                widget.bell()
+            except Exception:
+                pass
         return "break"
 
     @staticmethod
