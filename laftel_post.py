@@ -624,10 +624,13 @@ class LaftelPost:
                 self.set_status(
                     f"กำลังส่ง {index}/{total}: {item['caption']} ..."
                 )
-                with discord.File(
+                upload = discord.File(
                     item["path"], filename=os.path.basename(item["path"])
-                ) as upload:
+                )
+                try:
                     await channel.send(content=item["caption"], file=upload)
+                finally:
+                    upload.close()
                 sent += 1
             self.set_status(f"ส่งสำเร็จ {sent}/{total} รูปแล้ว ♡")
             return sent
